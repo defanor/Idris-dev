@@ -1144,15 +1144,15 @@ fixColour True doc  = doc
 -- | processes clean AST, desugaring it and applying all sorts of
 -- rules (in progress)
 processParsed :: SyntaxInfo -> FilePath -> String -> Maybe Delta ->
-             [PDecl] -> Idris [PDecl]
+             [CPDecl] -> Idris [PDecl]
 processParsed syn fname input mrk ast = do
   -- desugar
---  let desugared = fmap (fmap (desugar defaultSyntax)) ast
+  let desugared = map (fmap desugarTerm) ast
   -- process !-notation
-  let debound = fmap (fmap debindApp) ast
+  let debound = fmap (fmap debindApp) desugared
   -- collect clauses
   return $ collect debound
-
+  where desugarTerm (CPTerm syn t) = desugar syn t
 
 
 -- | A program is a list of declarations, possibly with associated
@@ -1275,8 +1275,9 @@ loadSource h lidr f toline
                   mapM_ (addIBC . IBCImport) [realName | (realName, alias, fc) <- imports]
                   let syntax = defaultSyntax{ syn_namespace = reverse mname,
                                               maxline = toline }
-                  ds'' <- parseProg syntax f file pos
-                  ds' <- processParsed syntax f file pos ds''
+                  -- ds'' <- parseProg syntax f file pos
+                  -- ds' <- processParsed syntax f file pos ds''
+                  ds' <- parseProg syntax f file pos
 
                   -- Parsing done, now process declarations
 

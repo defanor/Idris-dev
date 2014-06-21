@@ -582,6 +582,7 @@ deriving instance NFData PData'
 -- across a program, by deriving Functor
 
 type PDecl   = PDecl' PTerm
+type CPDecl  = PDecl' CPTerm
 type PData   = PData' PTerm
 type PClause = PClause' PTerm
 
@@ -705,6 +706,9 @@ data PTerm = PQuote Raw
            | PUnifyLog PTerm -- ^ dump a trace of unifications when building term
            | PNoImplicits PTerm -- ^ never run implicit converions on the term
        deriving Eq
+
+-- | A PTerm with captured SyntaxInfo
+data CPTerm = CPTerm SyntaxInfo PTerm
 
 
 {-!
