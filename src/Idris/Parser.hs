@@ -184,8 +184,8 @@ decl syn = do fc <- getFC
                    <?> "declaration"
         declBody' :: IdrisParser [PDecl]
         declBody' = do d <- decl' syn
-                       --let d' = fmap (desugar syn) d
-                       return [d]
+                       let d' = fmap (desugar syn) d
+                       return [d']
 
 {- | Parses a top-level declaration with possible syntax sugar
 
@@ -1147,9 +1147,9 @@ processParsed :: SyntaxInfo -> FilePath -> String -> Maybe Delta ->
              [PDecl] -> Idris [PDecl]
 processParsed syn fname input mrk ast = do
   -- desugar
-  let desugared = fmap (fmap (desugar defaultSyntax)) ast
+--  let desugared = fmap (fmap (desugar defaultSyntax)) ast
   -- process !-notation
-  let debound = fmap (fmap debindApp) desugared
+  let debound = fmap (fmap debindApp) ast
   -- collect clauses
   return $ collect debound
 
