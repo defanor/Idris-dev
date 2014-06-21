@@ -50,8 +50,7 @@ disallowImp syn = syn { implicitAllowed = False }
 fullExpr :: SyntaxInfo -> IdrisParser PTerm
 fullExpr syn = do x <- expr syn
                   eof
-                  i <- get
-                  return $ debindApp syn (desugar syn i x)
+                  return $ debindApp (desugar syn x)
 
 
 {- | Parses an expression
@@ -537,7 +536,7 @@ app syn = do f <- reserved "mkForeign"
     dslify :: IState -> PTerm -> PTerm
     dslify i (PApp fc (PRef _ f) [a])
         | [d] <- lookupCtxt f (idris_dsls i)
-            = desugar (syn { dsl_info = d }) i (getTm a)
+            = desugar (syn { dsl_info = d }) (getTm a)
     dslify i t = t
 
 {-| Parses a function argument
@@ -1184,41 +1183,41 @@ tactic syn = do reserved "intro"; ns <- sepBy (indentPropHolds gtProp *> name) (
                  return $ MatchRefine n
           <|> do reserved "rewrite"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ Rewrite (desugar syn i t)
+                 return $ Rewrite (desugar syn t)
           <|> do reserved "case"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ CaseTac (desugar syn i t)
+                 return $ CaseTac (desugar syn t)
           <|> do reserved "induction"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ Induction (desugar syn i t)
+                 return $ Induction (desugar syn t)
           <|> do reserved "equiv"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ Equiv (desugar syn i t)
+                 return $ Equiv (desugar syn t)
           <|> try (do reserved "let"; n <- (indentPropHolds gtProp *> name); (indentPropHolds gtProp *> lchar ':');
                       ty <- (indentPropHolds gtProp *> expr' syn); (indentPropHolds gtProp *> lchar '='); t <- (indentPropHolds gtProp *> expr syn);
                       i <- get
-                      return $ LetTacTy n (desugar syn i ty) (desugar syn i t))
+                      return $ LetTacTy n (desugar syn ty) (desugar syn t))
           <|> try (do reserved "let"; n <- (indentPropHolds gtProp *> name); (indentPropHolds gtProp *> lchar '=');
                       t <- (indentPropHolds gtProp *> expr syn);
                       i <- get
-                      return $ LetTac n (desugar syn i t))
+                      return $ LetTac n (desugar syn t))
           <|> do reserved "focus"; n <- (indentPropHolds gtProp *> name)
                  return $ Focus n
           <|> do reserved "exact"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ Exact (desugar syn i t)
+                 return $ Exact (desugar syn t)
           <|> do reserved "applyTactic"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ ApplyTactic (desugar syn i t)
+                 return $ ApplyTactic (desugar syn t)
           <|> do reserved "byReflection"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ ByReflection (desugar syn i t)
+                 return $ ByReflection (desugar syn t)
           <|> do reserved "reflect"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ Reflect (desugar syn i t)
+                 return $ Reflect (desugar syn t)
           <|> do reserved "fill"; t <- (indentPropHolds gtProp *> expr syn);
                  i <- get
-                 return $ Fill (desugar syn i t)
+                 return $ Fill (desugar syn t)
           <|> do reserved "try"; t <- (indentPropHolds gtProp *> tactic syn);
                  lchar '|';
                  t1 <- (indentPropHolds gtProp *> tactic syn)
@@ -1248,11 +1247,11 @@ tactic syn = do reserved "intro"; ns <- sepBy (indentPropHolds gtProp *> name) (
                   <|> (do (reserved "e" <|> reserved "eval");
                           t <- (indentPropHolds gtProp *> expr syn);
                           i <- get
-                          return $ TEval (desugar syn i t))
+                          return $ TEval (desugar syn t))
                   <|> (do (reserved "t" <|> reserved "type");
                           t <- (indentPropHolds gtProp *> expr syn);
                           i <- get
-                          return $ TCheck (desugar syn i t))
+                          return $ TCheck (desugar syn t))
                   <?> "prover command")
           <?> "tactic"
   where

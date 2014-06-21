@@ -184,9 +184,8 @@ decl syn = do fc <- getFC
                    <?> "declaration"
         declBody' :: IdrisParser [PDecl]
         declBody' = do d <- decl' syn
-                       i <- get
-                       let d' = fmap (debindApp syn . (desugar syn i)) d
-                       return [d']
+                       --let d' = fmap (desugar syn) d
+                       return [d]
 
 {- | Parses a top-level declaration with possible syntax sugar
 
@@ -312,8 +311,7 @@ syntaxSym =    try (do lchar '['; n <- name; lchar ']'
 fnDecl :: SyntaxInfo -> IdrisParser [PDecl]
 fnDecl syn = try (do notEndBlock
                      d <- fnDecl' syn
-                     i <- get
-                     let d' = fmap (desugar syn i) d
+                     let d' = fmap (desugar syn) d
                      return [d']) <?> "function declaration"
 
 {-| Parses a function declaration
@@ -1142,6 +1140,21 @@ fixColour :: Bool -> ANSI.Doc -> ANSI.Doc
 fixColour False doc = ANSI.plain doc
 fixColour True doc  = doc
 
+
+-- | processes clean AST, desugaring it and applying all sorts of
+-- rules (in progress)
+processParsed :: SyntaxInfo -> FilePath -> String -> Maybe Delta ->
+             [PDecl] -> Idris [PDecl]
+processParsed syn fname input mrk ast = do
+  -- desugar
+  let desugared = fmap (fmap (desugar defaultSyntax)) ast
+  -- process !-notation
+  let debound = fmap (fmap debindApp) desugared
+  -- collect clauses
+  return $ collect debound
+
+
+
 -- | A program is a list of declarations, possibly with associated
 -- documentation strings.
 parseProg :: SyntaxInfo -> FilePath -> String -> Maybe Delta ->
@@ -1160,7 +1173,7 @@ parseProg syn fname input mrk
                                   return []
             Success (x, i)  -> do putIState i
                                   reportParserWarnings
-                                  return $ collect x
+                                  return x
   where mainProg :: IdrisParser ([PDecl], IState)
         mainProg = case mrk of
                         Nothing -> do i <- get; return ([], i)
@@ -1262,7 +1275,8 @@ loadSource h lidr f toline
                   mapM_ (addIBC . IBCImport) [realName | (realName, alias, fc) <- imports]
                   let syntax = defaultSyntax{ syn_namespace = reverse mname,
                                               maxline = toline }
-                  ds' <- parseProg syntax f file pos
+                  ds'' <- parseProg syntax f file pos
+                  ds' <- processParsed syntax f file pos ds''
 
                   -- Parsing done, now process declarations
 

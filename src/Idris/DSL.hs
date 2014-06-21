@@ -11,11 +11,11 @@ import Idris.Core.Evaluate
 import Control.Monad.State.Strict
 import Debug.Trace
 
-debindApp :: SyntaxInfo -> PTerm -> PTerm
-debindApp syn t = debind (dsl_bind (dsl_info syn)) t
+debindApp :: PTerm -> PTerm
+debindApp t = debind (dsl_bind initDSL) t
 
-desugar :: SyntaxInfo -> IState -> PTerm -> PTerm
-desugar syn i t = let t' = expandDo (dsl_info syn) t in
+desugar :: SyntaxInfo -> PTerm -> PTerm
+desugar syn t = let t' = expandDo (dsl_info syn) t in
                       t' -- addImpl i t'
 
 expandDo :: DSL -> PTerm -> PTerm
