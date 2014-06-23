@@ -535,6 +535,7 @@ data PDecl' t
    | PProvider SyntaxInfo FC (ProvideWhat' t) Name -- ^ Type provider. The first t is the type, the second is the term
    | PTransform FC Bool t t -- ^ Source-to-source transformation rule. If
                             -- bool is True, lhs and rhs must be convertible
+   | PUsing [Using] [PDecl' t] -- a 'using' block
  deriving Functor
 {-!
 deriving instance Binary PDecl'
@@ -582,7 +583,6 @@ deriving instance NFData PData'
 -- across a program, by deriving Functor
 
 type PDecl   = PDecl' PTerm
-type CPDecl  = PDecl' CPTerm
 type PData   = PData' PTerm
 type PClause = PClause' PTerm
 
@@ -706,9 +706,6 @@ data PTerm = PQuote Raw
            | PUnifyLog PTerm -- ^ dump a trace of unifications when building term
            | PNoImplicits PTerm -- ^ never run implicit converions on the term
        deriving Eq
-
--- | A PTerm with captured SyntaxInfo
-data CPTerm = CPTerm SyntaxInfo PTerm
 
 
 {-!

@@ -465,7 +465,7 @@ using_ syn =
        let uvars = using syn
        ds <- many (decl (syn { using = uvars ++ ns }))
        closeBlock
-       return (concat ds)
+       return $ [PUsing ns (concat ds)]
     <?> "using declaration"
 
 {- | Parses a parameters declaration
@@ -1141,18 +1141,93 @@ fixColour False doc = ANSI.plain doc
 fixColour True doc  = doc
 
 
--- | processes clean AST, desugaring it and applying all sorts of
--- rules (in progress)
+-- | processes AST, desugaring it and applying all sorts of rules (in
+-- progress)
 processParsed :: SyntaxInfo -> FilePath -> String -> Maybe Delta ->
-             [CPDecl] -> Idris [PDecl]
+             [PDecl] -> Idris [PDecl]
 processParsed syn fname input mrk ast = do
   -- desugar
-  let desugared = map (fmap desugarTerm) ast
+  -- let desugared = map (fmap desugarTerm) ast
   -- process !-notation
-  let debound = fmap (fmap debindApp) desugared
+  let debound = fmap (fmap debindApp) (desugarDecl syn ast)
   -- collect clauses
   return $ collect debound
-  where desugarTerm (CPTerm syn t) = desugar syn t
+  where desugarTerm t = desugar syn t
+
+
+desugarClause :: SyntaxInfo -> [PClause] -> [PClause]
+desugarClause syn [] = []
+desugarClause syn (c : cs) =
+  case c of
+    PClause fc n t1 lt t2 ld -> PClause fc n (desugar' syn t1) (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
+    PWith fc n t1 lt t2 ld -> PWith fc n (desugar' syn t1) (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
+    PClauseR fc lt t2 ld -> PClauseR fc (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
+    PWithR fc lt t2 ld -> PWithR fc (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
+  : desugarClause syn cs
+
+desugarData :: SyntaxInfo -> PData -> PData
+desugarData syn (PDatadecl n t l) = PDatadecl n (desugar' syn t) (desugarDL l)
+  where desugarDL [] = []
+        desugarDL ((ds, lnds, n, t, fc, ln) : rest) = (ds, lnds, n, desugar' syn t, fc, ln) : desugarDL rest
+desugarData syn (PLaterdecl n t) = PLaterdecl n (desugar' syn t)
+
+desugarDecl :: SyntaxInfo -> [PDecl] -> [PDecl]
+-- it's prog here, a list of decl; just traverse it, restore syntax
+-- rules and dsl in the state, and call desugar when needed
+
+-- desugar terms if there are any; change syntax if decl changes the
+-- syntax
+
+desugarDecl syn [] = []
+desugarDecl syn (d:ds) =
+  case d of
+    -- no decls, no terms, no syntax change
+    PFix {} -> d : (desugarDecl syn ds)
+    -- there is a term, and syntax is captured, though it should be
+    -- the same as current syn; "ty <- typeExpr (allowImp syn)"
+    PTy ds' ndsl syn' fc fo n t -> PTy ds' ndsl syn' fc fo n (desugar' syn t) : desugarDecl syn ds
+    -- there's a term
+    PPostulate ds' syn' fc fo n t -> PPostulate ds' syn' fc fo n (desugar' syn t) : desugarDecl syn ds
+    -- there are terms, and even lists of decls; should not affect syntax outside of itself
+    PClauses fc fo n lc -> PClauses fc fo n (desugarClause syn lc) : desugarDecl syn ds
+    -- only a term
+    PCAF fc n t -> PCAF fc n (desugar' syn t) : desugarDecl syn ds
+    -- there is syntax captured, and PData; todo: check/desugar later
+    PData ds' lnds syn' fc dopts pd -> PData ds' lnds syn' fc dopts (desugarData syn pd) : desugarDecl syn ds
+    -- a list of (Name, t) and a list of decls
+    PParams fc lnt ld -> PParams fc (map (\(x,y) -> (x, desugar' syn y)) lnt) (desugarDecl syn ld) : desugarDecl syn ds
+    -- a list of decls here, not affecting syntax outside
+    PNamespace s ld -> PNamespace s (desugarDecl syn ld) : desugarDecl syn ds
+    -- only two terms and syntax captured
+    PRecord ds1 syn' fc n1 t1 dopts ds2 n2 t2 ->
+      PRecord ds1 syn' fc n1 (desugar' syn t1) dopts ds2 n2 (desugar' syn t2)
+      : desugarDecl syn ds
+    -- a list of terms, a list of (Name, t), and a list of decls here; not affecting syntax outside
+    -- also syntax is captured here
+    PClass ds' syn' fc lt n lnt lnds ld ->
+      PClass ds' syn' fc (map (desugar' syn) lt) n (map (\(x,y) -> (x, desugar' syn y)) lnt) lnds (desugarDecl syn ld)
+      : desugarDecl syn ds
+    -- should not affect syntax outside, and syntax is captured here too
+    PInstance syn' fc lt1 n lt2 t mn ld ->
+      PInstance syn' fc (map (desugar' syn) lt1) n (map (desugar' syn) lt2) (desugar' syn t) mn (desugarDecl syn ld)
+      : desugarDecl syn ds
+    -- this finally affects the syntax outside, modify dsl_info
+    PDSL n dsl -> d : desugarDecl (syn { dsl_info = dsl }) ds
+    -- this affects the syntax too, but it's about syntax rules, which
+    -- is not used for desugaring, but will need it later
+    PSyntax fc syntax -> d : desugarDecl syn ds
+    -- mutual, shouldn't affect syntax outside
+    PMutual fc ld -> PMutual fc (desugarDecl syn ld) : (desugarDecl syn ds)
+    -- directive, no terms or decls
+    PDirective{} -> d : desugarDecl syn ds
+    -- has captured syntax, should not affect anything outside
+    -- todo: check the third argument, probably it should be desugared too
+    PProvider syn' fc pw n -> d : desugarDecl syn ds
+    -- 
+    PTransform fc b t1 t2 -> PTransform fc b (desugar' syn t1) (desugar' syn t2) : desugarDecl syn ds
+    -- this one is a new thing: add using to syntax
+    PUsing ns decls -> let uvars = using syn in
+      desugarDecl (syn { using = uvars ++ ns }) decls ++ desugarDecl syn ds
 
 
 -- | A program is a list of declarations, possibly with associated
@@ -1275,9 +1350,9 @@ loadSource h lidr f toline
                   mapM_ (addIBC . IBCImport) [realName | (realName, alias, fc) <- imports]
                   let syntax = defaultSyntax{ syn_namespace = reverse mname,
                                               maxline = toline }
-                  -- ds'' <- parseProg syntax f file pos
-                  -- ds' <- processParsed syntax f file pos ds''
-                  ds' <- parseProg syntax f file pos
+                  ds'' <- parseProg syntax f file pos
+                  ds' <- processParsed syntax f file pos ds''
+                  --ds' <- parseProg syntax f file pos
 
                   -- Parsing done, now process declarations
 

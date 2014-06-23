@@ -15,8 +15,11 @@ debindApp :: PTerm -> PTerm
 debindApp t = debind (dsl_bind initDSL) t
 
 desugar :: SyntaxInfo -> PTerm -> PTerm
-desugar syn t = let t' = expandDo (dsl_info syn) t in
-                      t' -- addImpl i t'
+desugar syn t = t
+
+desugar' :: SyntaxInfo -> PTerm -> PTerm
+desugar' syn t = let t' = expandDo (dsl_info syn) t in
+                       t' -- addImpl i t'
 
 expandDo :: DSL -> PTerm -> PTerm
 expandDo dsl (PLam n ty tm)
