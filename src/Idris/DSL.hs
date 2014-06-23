@@ -22,6 +22,7 @@ desugar' syn t = let t' = expandDo (dsl_info syn) t in
                        t' -- addImpl i t'
 
 expandDo :: DSL -> PTerm -> PTerm
+expandDo dsl (PDSLify dsl' tm) = expandDo dsl' tm
 expandDo dsl (PLam n ty tm)
     | Just lam <- dsl_lambda dsl
         = let sc = PApp (fileFC "(dsl)") lam [pexp (var dsl n tm 0)] in

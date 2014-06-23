@@ -705,6 +705,7 @@ data PTerm = PQuote Raw
            | PDisamb [[T.Text]] PTerm -- ^ Preferences for explicit namespaces
            | PUnifyLog PTerm -- ^ dump a trace of unifications when building term
            | PNoImplicits PTerm -- ^ never run implicit converions on the term
+           | PDSLify DSL PTerm -- ^ a term with captured dsl_info
        deriving Eq
 
 
@@ -910,7 +911,7 @@ data DSL' t = DSL { dsl_bind    :: t,
                     dsl_let     :: Maybe t,
                     dsl_pi      :: Maybe t
                   }
-    deriving (Show, Functor)
+    deriving (Eq, Show, Functor)
 {-!
 deriving instance Binary DSL'
 deriving instance NFData DSL'

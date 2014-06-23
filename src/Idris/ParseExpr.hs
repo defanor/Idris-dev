@@ -536,7 +536,7 @@ app syn = do f <- reserved "mkForeign"
     dslify :: IState -> PTerm -> PTerm
     dslify i (PApp fc (PRef _ f) [a])
         | [d] <- lookupCtxt f (idris_dsls i)
-            = desugar (syn { dsl_info = d }) (getTm a)
+            = PDSLify d (getTm a) --desugar (syn { dsl_info = d }) (getTm a)
     dslify i t = t
 
 {-| Parses a function argument

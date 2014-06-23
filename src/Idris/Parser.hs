@@ -1159,11 +1159,12 @@ desugarClause :: SyntaxInfo -> [PClause] -> [PClause]
 desugarClause syn [] = []
 desugarClause syn (c : cs) =
   case c of
-    PClause fc n t1 lt t2 ld -> PClause fc n (desugar' syn t1) (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
-    PWith fc n t1 lt t2 ld -> PWith fc n (desugar' syn t1) (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
-    PClauseR fc lt t2 ld -> PClauseR fc (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
-    PWithR fc lt t2 ld -> PWithR fc (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl syn ld)
+    PClause fc n t1 lt t2 ld -> PClause fc n (desugar' syn t1) (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl wsyn ld)
+    PWith fc n t1 lt t2 ld -> PWith fc n (desugar' syn t1) (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl wsyn ld)
+    PClauseR fc lt t2 ld -> PClauseR fc (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl wsyn ld)
+    PWithR fc lt t2 ld -> PWithR fc (map (desugar' syn) lt) (desugar' syn t2) (desugarDecl wsyn ld)
   : desugarClause syn cs
+  where wsyn = syn { syn_namespace = [] }
 
 desugarData :: SyntaxInfo -> PData -> PData
 desugarData syn (PDatadecl n t l) = PDatadecl n (desugar' syn t) (desugarDL l)
@@ -1192,7 +1193,7 @@ desugarDecl syn (d:ds) =
     PClauses fc fo n lc -> PClauses fc fo n (desugarClause syn lc) : desugarDecl syn ds
     -- only a term
     PCAF fc n t -> PCAF fc n (desugar' syn t) : desugarDecl syn ds
-    -- there is syntax captured, and PData; todo: check/desugar later
+    -- there is syntax captured, and PData
     PData ds' lnds syn' fc dopts pd -> PData ds' lnds syn' fc dopts (desugarData syn pd) : desugarDecl syn ds
     -- a list of (Name, t) and a list of decls
     PParams fc lnt ld -> PParams fc (map (\(x,y) -> (x, desugar' syn y)) lnt) (desugarDecl syn ld) : desugarDecl syn ds
@@ -1211,8 +1212,9 @@ desugarDecl syn (d:ds) =
     PInstance syn' fc lt1 n lt2 t mn ld ->
       PInstance syn' fc (map (desugar' syn) lt1) n (map (desugar' syn) lt2) (desugar' syn t) mn (desugarDecl syn ld)
       : desugarDecl syn ds
-    -- this finally affects the syntax outside, modify dsl_info
-    PDSL n dsl -> d : desugarDecl (syn { dsl_info = dsl }) ds
+    -- this finally affects the syntax outside, dsl_info
+    -- but DSL is captured in terms already
+    PDSL n dsl -> d : desugarDecl syn ds
     -- this affects the syntax too, but it's about syntax rules, which
     -- is not used for desugaring, but will need it later
     PSyntax fc syntax -> d : desugarDecl syn ds
@@ -1225,9 +1227,15 @@ desugarDecl syn (d:ds) =
     PProvider syn' fc pw n -> d : desugarDecl syn ds
     -- 
     PTransform fc b t1 t2 -> PTransform fc b (desugar' syn t1) (desugar' syn t2) : desugarDecl syn ds
-    -- this one is a new thing: add using to syntax
+    -- this one is a new thing: add 'using' to syntax (though it's not
+    -- used afterwards; the purpose of this is to limit scope of inner
+    -- dsl's)
     PUsing ns decls -> let uvars = using syn in
       desugarDecl (syn { using = uvars ++ ns }) decls ++ desugarDecl syn ds
+
+  -- ↑ all that stuff actually could be replaced with fmap; but
+  -- probably there will be need in syntax modification later on
+  -- refactoring
 
 
 -- | A program is a list of declarations, possibly with associated
