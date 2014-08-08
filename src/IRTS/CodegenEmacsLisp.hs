@@ -82,7 +82,7 @@ translateBC bc
   | otherwise                   = "//" ++ show bc
   where
     constcase (c, bc) = "(`" ++ show c ++ " (progn " ++ concatMap translateBC bc ++ "))"
-    varcase (c, bc) = "(`(" ++ show c ++ " ,_) (progn " ++ concatMap translateBC bc ++ "))"
+    varcase (c, bc) = "(`(" ++ show c ++ " . ,_) (progn " ++ concatMap translateBC bc ++ "))"
 
 translateOP :: PrimFn -> String
 translateOP (LMinus _)   = "-"
