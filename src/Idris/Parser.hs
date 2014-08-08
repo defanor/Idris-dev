@@ -937,6 +937,7 @@ Codegen ::= 'C'
         |   'Node'
         |   'LLVM'
         |   'Bytecode'
+        |   'EmacsLisp'
         ;
 @
 -}
@@ -947,6 +948,7 @@ codegen_ = do reserved "C"; return ViaC
        <|> do reserved "Node"; return ViaNode
        <|> do reserved "LLVM"; return ViaLLVM
        <|> do reserved "Bytecode"; return Bytecode
+       <|> do reserved "EmacsLisp"; return ViaEmacsLisp
        <?> "code generation language"
 
 {- |Parses a compiler directive

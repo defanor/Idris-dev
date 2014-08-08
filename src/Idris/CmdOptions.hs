@@ -146,4 +146,5 @@ parseCodegen "bytecode" = Bytecode
 parseCodegen "javascript" = ViaJavaScript
 parseCodegen "node" = ViaNode
 parseCodegen "llvm" = ViaLLVM
+parseCodegen "elisp" = ViaEmacsLisp
 parseCodegen _ = error "unknown codegen" -- FIXME: partial function

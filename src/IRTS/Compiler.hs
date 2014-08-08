@@ -15,6 +15,7 @@ import IRTS.CodegenLLVM
 #else
 import Util.LLVMStubs
 #endif
+import IRTS.CodegenEmacsLisp
 import IRTS.Inliner
 
 import Idris.AbsSyntax
@@ -99,6 +100,7 @@ compile codegen f tm
                               ViaNode -> codegenNode cginfo
                               ViaLLVM -> codegenLLVM cginfo
                               Bytecode -> dumpBC c f
+                              ViaEmacsLisp -> codegenEmacsLisp cginfo
             Error e -> ierror e
   where checkMVs = do i <- getIState
                       case map fst (idris_metavars i) \\ primDefs of
