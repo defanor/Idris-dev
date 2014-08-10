@@ -18,10 +18,10 @@ import Control.Applicative ((<$>), (<*>), pure)
 {- Emacs Lisp compiler backend here. Very simple initial version of
 it, at least.
 
-Uses BC in order to optimize calls, like it is in JS backend.
+Uses BC in order to allow recursion with high depth, like it is in JS
+backend.
 
-ToDo: optimize calls, make nice AST and printing with proper spacing,
-test/fix everything, add includes, handle errors. -}
+ToDo: test/fix everything, add includes, handle errors. -}
 
 codegenEmacsLisp :: CodeGenerator
 codegenEmacsLisp ci =
@@ -38,51 +38,104 @@ codegenELisp definitions includes libs filename outputType = do
   let bytecode = map toBC definitions
   path       <- (++) <$> getDataDir <*> (pure "/elrts/")
   idrRuntime <- readFile $ path ++ "common.el"
-  TIO.writeFile filename (T.pack $ idrRuntime ++ mkDefuns bytecode)
+  let el       = translateBCs bytecode
+  TIO.writeFile filename (T.pack $ idrRuntime ++ (concatMap printElisp $ fixCalls $ map (\(n, c) -> (n, ([], c))) el))
   return ()
 
-mkDefuns :: [(Name, [BC])] -> String
-mkDefuns nb = concatMap mkDefun nb
-  where
-    mkDefun (name, bc) = "(defun " ++ (escapeName name) ++ " (old-base)\n(let ((my-old-base old-base))\n" ++ intercalate "\n" (map translateBC bc) ++ "))\n\n"
+translateBCs :: [(Name, [BC])] -> [(String, [Elisp])]
+translateBCs [] = []
+translateBCs ((n, bc) : rest) = (escapeName n, map translateBC bc) : translateBCs rest
 
-translateBC :: BC -> String
-translateBC bc
-  | ASSIGN r1 r2          <- bc = translateReg r1 True ++ translateReg r2 False ++ ")"
-  | ASSIGNCONST r c       <- bc = translateReg r True ++ show c ++ ")"
-  | UPDATE r1 r2          <- bc = translateReg r1 True ++ translateReg r2 False ++ ")"
-  | ADDTOP n              <- bc = "(setq idris-top (+ idris-top " ++ show n ++ "))"
-  | NULL r                <- bc = translateReg r True ++ "'())"
-  | CALL n                <- bc = "(" ++ escapeName n ++ " my-old-base)" -- todo: optimize
-  | TAILCALL n            <- bc = "(" ++ escapeName n ++ " my-old-base)" -- todo: optimize
-  | FOREIGNCALL r _ _ n a <- bc = translateReg r True ++ " (" ++ n ++ " " ++
-                                  (intercalate " " $ map (flip translateReg False . snd) a) ++ "))"
-  | TOPBASE n             <- bc = "(setq idris-top (+ idris-base " ++ show n ++ "))"
-  | BASETOP n             <- bc = "(setq idris-base (+ idris-top " ++ show n ++ "))"
-  | STOREOLD              <- bc = "(setq my-old-base idris-base)"
-  | SLIDE n               <- bc = "(idris-slide " ++ show n ++ ")"
-  | REBASE                <- bc = "(setq idris-base old-base)"
-  | RESERVE n             <- bc = "(idris-reserve " ++ show n ++ ")"
-  | MKCON r t rs          <- bc = (translateReg r True) ++
-                                  " (list " ++ show t ++ " " ++ (intercalate " " $ map (flip translateReg False) rs) ++ "))"
-  | CASE s r c d          <- bc =
-    --"case " ++ show s ++ " / " ++ translateReg r False ++ " / " ++ show c ++ " / " ++ show d
-    "(pcase " ++ translateReg r False ++ "\n" ++ intercalate "\n" (map varcase c) ++ "\n" ++
-    maybe "" (\d' -> "(_ (progn " ++ concatMap translateBC d' ++ "))") d ++
-    ")"
-  | CONSTCASE r c d       <- bc =
-    "(pcase " ++ translateReg r False ++ "\n" ++ intercalate "\n" (map constcase c) ++ "\n" ++
-    -- default case
-    maybe "" (\d' -> "(_ (progn " ++ concatMap translateBC d' ++ "))") d ++
-    ")"
-  | PROJECT r l a         <- bc = "(idris-project " ++ translateReg r False ++ " " ++ show l ++ " " ++ show a ++ ")"
-  | OP r o a              <- bc =
-    translateReg r True ++ "(" ++ translateOP o ++ " " ++ intercalate " " (map (flip translateReg False) a) ++ "))"
-  | ERROR e               <- bc = "(error " ++ show e ++ ")"
-  | otherwise                   = "//" ++ show bc
+data Elisp = ElRaw String
+           | ElCase String [(String, [Elisp])]
+           | ElCall String
+           | ElSLCall Bool String -- stackless call, second parameter indicates if we're just continuing there
+           deriving (Show)
+
+-- traverse given list with a zipper
+-- when call occurs, split the stuff, add calls, process the next definition
+-- when case occurs, do the same, but process stuff inside the case:
+-- just move it outside, making the stack to be like:
+-- func-after-case (added when case occurs) -> func-case-1 (addeed in the clause)
+-- so, we need a zipper for lists to split them, and a way to add definitions
+
+printElisp :: (String, [Elisp]) -> String
+printElisp (name, el) = "(defun " ++ name ++ " (old-base my-old-base)\n" ++
+                        concatMap (\x -> "  " ++ printExpr x ++ "\n") el ++
+                        ")\n\n"
   where
-    constcase (c, bc) = "(`" ++ show c ++ " (progn " ++ concatMap translateBC bc ++ "))"
-    varcase (c, bc) = "(`(" ++ show c ++ " . ,_) (progn " ++ concatMap translateBC bc ++ "))"
+    printExpr (ElRaw x) = x
+    printExpr (ElSLCall False x) = "(idris-call '" ++ x ++ " my-old-base my-old-base)"
+    printExpr (ElSLCall True x) = "(idris-call '" ++ x ++ " old-base my-old-base)"
+    printExpr (ElCase v cases) =
+      "(pcase " ++ v ++
+      concatMap (\(pat, code) -> "\n    (" ++ pat ++ " " ++ concatMap printExpr code ++ ")") cases
+      ++ ")"
+    printExpr x = "(idris-error \"unknown expr: " ++ (show x) ++ "\")"
+
+fixCalls :: [(String, ([Elisp], [Elisp]))] -> [(String, [Elisp])]
+-- empty
+fixCalls [] = []
+-- end of current definition
+fixCalls ((name, (prev, [])) : xs) = (name, prev) : fixCalls xs
+-- call
+fixCalls ((name, (prev, (ElCall cn) : next)) : xs) =
+  (name, prev ++ [ElSLCall True nextName, ElSLCall False cn]) : fixCalls ((nextName, ([], next)) : xs)
+  where nextName = name ++ "-cont"
+fixCalls ((name, (prev, (ElCase cr cl) : next)) : xs) =
+  (name, prev ++ [ElSLCall True nextName, ElCase cr (mkCases cl)]) : fixCalls (mkClauses cl ++ (nextName, ([], next)) : xs)
+  where
+    nextName = name ++ "-cont"
+    mkClauses [] = []
+    mkClauses ((_, code) : cl) = (clauseName, ([], code)) : mkClauses cl
+      where
+        clauseName = (name ++ "-case-" ++ (show $ length cl))
+    mkCases :: [((String, [Elisp]))] -> [((String, [Elisp]))]
+    mkCases [] = []
+    mkCases ((pat, _) : cl) = (pat, [ElSLCall True clauseName]) : mkCases cl
+      where
+        clauseName = (name ++ "-case-" ++ (show $ length cl))
+fixCalls ((name, (prev, other : next)) : xs) = fixCalls $ (name, (prev ++ [other], next)) : xs
+
+translateBC :: BC -> Elisp
+translateBC bc
+  | ASSIGN r1 r2          <- bc = ElRaw $ translateReg r1 (Just $ translateReg r2 Nothing)
+  | ASSIGNCONST r c       <- bc = ElRaw $ translateReg r (Just $ show c)
+  | UPDATE r1 r2          <- bc = ElRaw $ translateReg r1 (Just $ translateReg r2 Nothing)
+  | ADDTOP 0              <- bc = ElRaw $ ""
+  | ADDTOP n              <- bc = ElRaw $ "(setq idris-top (+ idris-top " ++ show n ++ "))"
+  | NULL r                <- bc = ElRaw $ translateReg r (Just "'()")
+  | CALL n                <- bc = ElCall $ escapeName n
+  | TAILCALL n            <- bc = ElCall $ escapeName n
+  | FOREIGNCALL r _ _ n a <- bc = ElRaw $ translateReg r (Just $ "(" ++ n ++ " " ++
+                                                  (intercalate " " $ map (flip translateReg Nothing . snd) a) ++ ")")
+  | TOPBASE 0             <- bc = ElRaw $ "(setq idris-top idris-base)"
+  | TOPBASE n             <- bc = ElRaw $ "(setq idris-top (+ idris-base " ++ show n ++ "))"
+  | BASETOP 0             <- bc = ElRaw $ "(setq idris-base idris-top)"
+  | BASETOP n             <- bc = ElRaw $ "(setq idris-base (+ idris-top " ++ show n ++ "))"
+  | STOREOLD              <- bc = ElRaw $ "(setq my-old-base idris-base)"
+  | SLIDE n               <- bc = ElRaw $ "(idris-slide " ++ show n ++ ")"
+  | REBASE                <- bc = ElRaw $ "(setq idris-base old-base)"
+  | RESERVE n             <- bc = ElRaw $ "(idris-reserve " ++ show n ++ ")"
+  | MKCON r t rs          <- bc = ElRaw $ translateReg r (Just $
+                                                  "(list " ++ show t ++ " " ++
+                                                  (intercalate " " $ map (flip translateReg Nothing) rs) ++ ")")
+  | CASE s r c d          <- bc = ElCase
+                                  -- car-safe is here because sometimes we need to use default case
+                                  -- when value is not even a list
+                                  ("(and (car-safe " ++ (translateReg r Nothing) ++ ") (car " ++
+                                   (translateReg r Nothing) ++ "))")
+                                  ((map mkCase c) ++ maybe [] (\d' -> [("_", map translateBC d')]) d)
+  | CONSTCASE r c d       <- bc = ElCase
+                                  (translateReg r Nothing)
+                                  ((map mkCase c) ++ maybe [] (\d' -> [("_", map translateBC d')]) d)
+  | PROJECT r l a         <- bc = ElRaw $ "(idris-project " ++ translateReg r Nothing ++ " " ++ show l ++ " " ++ show a ++ ")"
+  | OP r o a              <- bc = ElRaw $
+    translateReg r (Just $ "(" ++ translateOP o ++ " " ++ intercalate " " (map (flip translateReg Nothing) a) ++ ")")
+  | ERROR e               <- bc = ElRaw $ "(error " ++ show e ++ ")"
+  | otherwise                   = ElRaw $ "//" ++ show bc
+  where
+    mkCase (c, bc) = (show c, map translateBC bc)
 
 translateOP :: PrimFn -> String
 translateOP (LMinus _)   = "-"
@@ -102,17 +155,16 @@ prepLVar :: LVar -> String
 prepLVar (Loc i) = "loc-" ++ (show i)
 prepLVar (Glob n) = "idris-glob-" ++ escapeName n
 
-translateReg :: Reg -> Bool -> String
-translateReg reg update
-  | RVal <- reg = if update
-                  then "(setq ret "
-                  else "ret"
-  | Tmp  <- reg = if update
-                  then "(setq tmp "
-                  else "tmp"
-  | L n  <- reg = if update
-                  then "(aset idris-stack (+ idris-base " ++ show n ++ ") "
-                  else "(aref idris-stack (+ idris-base " ++ show n ++ "))"
-  | T n  <- reg = if update
-                  then "(aset idris-stack (+ idris-top " ++ show n ++ ") "
-                  else "(aref idris-stack (+ idris-top " ++ show n ++ "))"
+translateReg :: Reg -> Maybe String -> String
+translateReg RVal  Nothing  = "ret"
+translateReg Tmp   Nothing  = "tmp"
+translateReg (L 0) Nothing  = "(aref idris-stack idris-base)"
+translateReg (L n) Nothing  = "(aref idris-stack (+ idris-base " ++ show n ++ "))"
+translateReg (T 0) Nothing  = "(aref idris-stack idris-top)"
+translateReg (T n) Nothing  = "(aref idris-stack (+ idris-top " ++ show n ++ "))"
+translateReg RVal  (Just s) = "(setq ret " ++ s ++ ")"
+translateReg Tmp   (Just s) = "(setq tmp " ++ s ++ ")"
+translateReg (L 0) (Just s) = "(aset idris-stack idris-base " ++ s ++ ")"
+translateReg (L n) (Just s) = "(aset idris-stack (+ idris-base " ++ show n ++ ") " ++ s ++ ")"
+translateReg (T 0) (Just s) = "(aset idris-stack idris-top " ++ s ++ ")"
+translateReg (T n) (Just s) = "(aset idris-stack (+ idris-top " ++ show n ++ ") " ++ s ++ ")"
