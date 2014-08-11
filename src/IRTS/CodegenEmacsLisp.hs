@@ -121,10 +121,10 @@ translateBC bc
                                                   "(list " ++ show t ++ " " ++
                                                   (intercalate " " $ map (flip translateReg Nothing) rs) ++ ")")
   | CASE s r c d          <- bc = ElCase
-                                  -- car-safe is here because sometimes we need to use default case
-                                  -- when value is not even a list
-                                  ("(and (car-safe " ++ (translateReg r Nothing) ++ ") (car " ++
-                                   (translateReg r Nothing) ++ "))")
+                                  (let cv = "(car " ++ (translateReg r Nothing) ++ ")" in
+                                    if s
+                                    then cv
+                                    else "(and (car-safe " ++ (translateReg r Nothing) ++ ") " ++ cv ++ ")")
                                   ((map mkCase c) ++ maybe [] (\d' -> [("_", map translateBC d')]) d)
   | CONSTCASE r c d       <- bc = ElCase
                                   (translateReg r Nothing)
