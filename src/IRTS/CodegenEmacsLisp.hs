@@ -10,6 +10,8 @@ import IRTS.System
 import Util.System
 
 import Data.List
+import Data.Char
+import Numeric
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
@@ -69,7 +71,7 @@ printElisp (name, el) = "(defun " ++ name ++ " (old-base my-old-base)\n" ++
     printExpr (ElSLCall True x) = "(idris-call '" ++ x ++ " old-base my-old-base)"
     printExpr (ElCase v cases) =
       "(pcase " ++ v ++
-      concatMap (\(pat, code) -> "\n    (" ++ pat ++ " " ++ concatMap printExpr code ++ ")") cases
+      concatMap (\(pat, code) -> "\n    (" ++ pat ++ " (progn " ++ concatMap printExpr code ++ "))") cases
       ++ ")"
     printExpr x = "(idris-error \"unknown expr: " ++ (show x) ++ "\")"
 
@@ -82,12 +84,33 @@ fixCalls ((name, (prev, [])) : xs) = (name, prev) : fixCalls xs
 fixCalls ((name, (prev, (ElCall cn) : next)) : xs) =
   (name, prev ++ [ElSLCall True nextName, ElSLCall False cn]) : fixCalls ((nextName, ([], next)) : xs)
   where nextName = name ++ "-cont"
+-- fixCalls ((name, (prev, (ElCase cr cl) : next)) : xs) =
+--   fixCalls $ (name, (prev ++ [ElCase cr $ mkCases cl], next)) : xs
+--   where
+--     mkCases ((n, c) : rest) = (n, mkCase c) : mkCases rest
+--       where
+--         mkCase [] = []
+--         mkCase (ElCall func : next) = ElRaw ("(" ++ func ++ " my-old-base my-old-base)") : mkCase next -- ElSLCall False func : mkCase next
+--         mkCase (other : next) = other : mkCase next
+--     mkCases other = other
+-- fixCalls ((name, (prev, (ElCase cr cl) : next)) : xs) =
+--   (name, prev ++ [ElSLCall True nextName, ElCase cr (mkCases cl)]) : fixCalls (mkClauses cl ++ (nextName, ([], next)) : xs)
+--   where
+--     nextName = name ++ "-cont"
+--     mkClauses [] = []
+--     mkClauses ((_, code) : cl) = (clauseName, ([], code)) : mkClauses cl
+--       where
+--         clauseName = (name ++ "-case-" ++ (show $ length cl))
+--     mkCases :: [((String, [Elisp]))] -> [((String, [Elisp]))]
+--     mkCases [] = []
+--     mkCases ((pat, _) : cl) = (pat, [ElSLCall True clauseName]) : mkCases cl
+--       where
+--         clauseName = (name ++ "-case-" ++ (show $ length cl))
 fixCalls ((name, (prev, (ElCase cr cl) : next)) : xs) =
-  (name, prev ++ [ElSLCall True nextName, ElCase cr (mkCases cl)]) : fixCalls (mkClauses cl ++ (nextName, ([], next)) : xs)
+  (name, prev ++ [ElCase cr (mkCases cl)]) : fixCalls (mkClauses cl ++ xs)
   where
-    nextName = name ++ "-cont"
     mkClauses [] = []
-    mkClauses ((_, code) : cl) = (clauseName, ([], code)) : mkClauses cl
+    mkClauses ((_, code) : cl) = (clauseName, ([], code ++ next)) : mkClauses cl
       where
         clauseName = (name ++ "-case-" ++ (show $ length cl))
     mkCases :: [((String, [Elisp]))] -> [((String, [Elisp]))]
@@ -128,7 +151,7 @@ translateBC bc
                                   ((map mkCase c) ++ maybe [] (\d' -> [("_", map translateBC d')]) d)
   | CONSTCASE r c d       <- bc = ElCase
                                   (translateReg r Nothing)
-                                  ((map mkCase c) ++ maybe [] (\d' -> [("_", map translateBC d')]) d)
+                                  ((map mkConstCase c) ++ maybe [] (\d' -> [("_", map translateBC d')]) d)
   | PROJECT r l a         <- bc = ElRaw $ "(idris-project " ++ translateReg r Nothing ++ " " ++ show l ++ " " ++ show a ++ ")"
   | OP r o a              <- bc = ElRaw $
     translateReg r (Just $ "(" ++ translateOP o ++ " " ++ intercalate " " (map (flip translateReg Nothing) a) ++ ")")
@@ -136,12 +159,13 @@ translateBC bc
   | otherwise                   = ElRaw $ "//" ++ show bc
   where
     mkCase (c, bc) = (show c, map translateBC bc)
+    mkConstCase (c, bc) = (showConst c, map translateBC bc)
 
 showConst :: Const -> String
 showConst (I i) = show i
 showConst (BI i) = show i
 showConst (Fl d) = show d
-showConst (Ch c) = '?' : [c]
+showConst (Ch c) = "?\\x" ++ showHex (ord c) ""
 showConst (Str s) = show s
 showConst (B8 w) = show w
 showConst (B16 w) = show w
@@ -160,13 +184,15 @@ translateOP LStrConcat                = "concat"
 translateOP (LIntStr _)               = "number-to-string"
 translateOP (LChInt _)                = "identity"
 translateOP (LIntCh _)                = "identity"
-translateOP (LEq _)                   = "eq"
+translateOP (LEq _)                   = "equal"
 translateOP LStrEq                    = "string="
 translateOP LReadStr                  = "read-from-minibuffer"
 translateOP (LSLt (ATInt _))          = "<"
 translateOP LStrHead                  = "(lambda (x) (aref x 0))"
 translateOP LStrTail                  = "(lambda (x) (substring x 1))"
 translateOP LStdIn                    = "identity \"stdin: \""
+translateOP (LSExt _ _)               = "identity"
+translateOP LStrCons                  = "(lambda (c s) (concat s (char-to-string c)))"
 translateOP n                         = "idris-error-undefined " ++ show n
 
 escapeName :: Name -> String
