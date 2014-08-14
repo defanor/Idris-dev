@@ -100,7 +100,7 @@ fixCalls ((name, (prev, other : next)) : xs) = fixCalls $ (name, (prev ++ [other
 translateBC :: BC -> Elisp
 translateBC bc
   | ASSIGN r1 r2          <- bc = ElRaw $ translateReg r1 (Just $ translateReg r2 Nothing)
-  | ASSIGNCONST r c       <- bc = ElRaw $ translateReg r (Just $ show c)
+  | ASSIGNCONST r c       <- bc = ElRaw $ translateReg r (Just $ showConst c)
   | UPDATE r1 r2          <- bc = ElRaw $ translateReg r1 (Just $ translateReg r2 Nothing)
   | ADDTOP 0              <- bc = ElRaw $ ""
   | ADDTOP n              <- bc = ElRaw $ "(setq idris-top (+ idris-top " ++ show n ++ "))"
@@ -137,19 +137,44 @@ translateBC bc
   where
     mkCase (c, bc) = (show c, map translateBC bc)
 
+showConst :: Const -> String
+showConst (I i) = show i
+showConst (BI i) = show i
+showConst (Fl d) = show d
+showConst (Ch c) = '?' : [c]
+showConst (Str s) = show s
+showConst (B8 w) = show w
+showConst (B16 w) = show w
+showConst (B32 w) = show w
+showConst (B64 w) = show w
+showConst (B8V v) = show v
+showConst (B16V v) = show v
+showConst (B32V v) = show v
+showConst (B64V v) = show v
+showConst c = '\'' : show c
+
 translateOP :: PrimFn -> String
-translateOP (LMinus _)   = "-"
-translateOP (LPlus _)    = "+"
-translateOP LStrConcat   = "concat"
-translateOP (LIntStr _)  = "number-to-string"
-translateOP n            = "idris-error-undefined " ++ show n
+translateOP (LMinus _)                = "-"
+translateOP (LPlus _)                 = "+"
+translateOP LStrConcat                = "concat"
+translateOP (LIntStr _)               = "number-to-string"
+translateOP (LChInt _)                = "identity"
+translateOP (LIntCh _)                = "identity"
+translateOP (LEq _)                   = "eq"
+translateOP LStrEq                    = "string="
+translateOP LReadStr                  = "read-from-minibuffer"
+translateOP (LSLt (ATInt _))          = "<"
+translateOP LStrHead                  = "(lambda (x) (aref x 0))"
+translateOP LStrTail                  = "(lambda (x) (substring x 1))"
+translateOP LStdIn                    = "identity \"stdin: \""
+translateOP n                         = "idris-error-undefined " ++ show n
 
 escapeName :: Name -> String
 escapeName n = escapeName' (showCG n)
   where
     escapeName' [] = []
     escapeName' (x : xs) = current ++ escapeName' xs
-      where current = if x `elem` " ," then ['\\', x] else [x]
+      where current = if x `elem` " ,#'()[]" then ['\\', x] else [x]
 
 prepLVar :: LVar -> String
 prepLVar (Loc i) = "loc-" ++ (show i)
