@@ -129,7 +129,7 @@ translateBC bc
   | ADDTOP n              <- bc = ElRaw $ "(setq idris-top (+ idris-top " ++ show n ++ "))"
   | NULL r                <- bc = ElRaw $ translateReg r (Just "'()")
   | CALL n                <- bc = ElCall $ escapeName n
-  | TAILCALL n            <- bc = ElCall $ escapeName n
+  | TAILCALL n            <- bc = ElSLCall True $ escapeName n
   | FOREIGNCALL r _ _ n a <- bc = ElRaw $ translateReg r (Just $ "(" ++ n ++ " " ++
                                                   (intercalate " " $ map (flip translateReg Nothing . snd) a) ++ ")")
   | TOPBASE 0             <- bc = ElRaw $ "(setq idris-top idris-base)"
@@ -156,7 +156,7 @@ translateBC bc
   | OP r o a              <- bc = ElRaw $
     translateReg r (Just $ "(" ++ translateOP o ++ " " ++ intercalate " " (map (flip translateReg Nothing) a) ++ ")")
   | ERROR e               <- bc = ElRaw $ "(error " ++ show e ++ ")"
-  | otherwise                   = ElRaw $ "//" ++ show bc
+  | otherwise                   = ElRaw $ ";; " ++ show bc
   where
     mkCase (c, bc) = (show c, map translateBC bc)
     mkConstCase (c, bc) = (showConst c, map translateBC bc)
@@ -184,15 +184,15 @@ translateOP LStrConcat                = "concat"
 translateOP (LIntStr _)               = "number-to-string"
 translateOP (LChInt _)                = "identity"
 translateOP (LIntCh _)                = "identity"
-translateOP (LEq _)                   = "equal"
-translateOP LStrEq                    = "string="
+translateOP (LEq _)                   = "(lambda (v1 v2) (if (equal v1 v2) 1 0))"
+translateOP LStrEq                    = "(lambda (s1 s2) (if (string= s1 s2) 1 0))"
 translateOP LReadStr                  = "read-from-minibuffer"
-translateOP (LSLt (ATInt _))          = "<"
+translateOP (LSLt (ATInt _))          = "(lambda (v1 v2) (if (< v1 v2) 1 0))"
 translateOP LStrHead                  = "(lambda (x) (aref x 0))"
 translateOP LStrTail                  = "(lambda (x) (substring x 1))"
 translateOP LStdIn                    = "identity \"stdin: \""
 translateOP (LSExt _ _)               = "identity"
-translateOP LStrCons                  = "(lambda (c s) (concat s (char-to-string c)))"
+translateOP LStrCons                  = "(lambda (c s) (concat (char-to-string c) s))"
 translateOP n                         = "idris-error-undefined " ++ show n
 
 escapeName :: Name -> String
